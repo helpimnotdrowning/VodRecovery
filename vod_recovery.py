@@ -10,7 +10,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import sleep, time
 from shutil import rmtree, copyfileobj
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from tkinter import filedialog
 from urllib.parse import urlparse
 from unicodedata import normalize
@@ -25,6 +25,8 @@ from tqdm import tqdm
 from ffmpeg_progress_yield import FfmpegProgress
 import logging
 import importlib.metadata
+
+import yt_dlp
 
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 logging.getLogger('aiohttp').setLevel(logging.CRITICAL)
@@ -135,6 +137,7 @@ def print_video_mode_menu():
         "2) Manual Recovery",
         "3) Bulk Recovery from SullyGnome CSV Export",
         "4) Return",
+        "5) Extract current stream with yt-dlp"
     ]
     while True:
         print("\n".join(vod_type_options))
@@ -1087,6 +1090,30 @@ def manual_vod_recover():
     m3u8_source = process_m3u8_configuration(m3u8_link)
     handle_download_menu(m3u8_source)
 
+def nhnd_current_with_ytdlp():
+    while True:
+        streamer_name = input("Enter the Streamer Name: ")
+        if streamer_name.lower().strip():
+            break
+        else:
+            print("\n✖  No streamer name! Please try again:\n")
+
+    streamer_name = streamer_name.lower().strip()
+
+    with yt_dlp.YoutubeDL() as ydl:
+        info = ydl.extract_info(f"https://twitch.tv/{streamer_name}", download=False)
+
+    video_id = str(info["id"])
+    timestamp = datetime.fromtimestamp(info["timestamp"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+    print(f"\nRecovering VOD for {streamer_name} with ID {video_id} at {timestamp}")
+    m3u8_link = vod_recover(streamer_name, video_id, timestamp)
+    if m3u8_link is None:
+        sys.exit("No M3U8 link found! Exiting...")
+
+    m3u8_source = process_m3u8_configuration(m3u8_link)
+    handle_download_menu(m3u8_source)
+
 
 def handle_vod_recover(url, url_parser, datetime_parser, website_name):
     streamer, video_id = url_parser(url)
@@ -1177,7 +1204,7 @@ async def get_vod_urls(streamer_name, video_id, start_timestamp):
 
     m3u8_link_list = [
         f"{domain.strip()}{str(hashlib.sha1(f'{streamer_name}_{video_id}_{int(calculate_epoch_timestamp(start_timestamp, seconds))}'.encode('utf-8')).hexdigest())[:20]}_{streamer_name}_{video_id}_{int(calculate_epoch_timestamp(start_timestamp, seconds))}/{quality}/index-dvr.m3u8"
-        for seconds in range(60)
+        for seconds in range(-20, 60)
         for domain in domains if domain.strip()
         for quality in qualities
     ]
@@ -3214,6 +3241,8 @@ def run_vod_recover():
                 bulk_vod_recovery()
             elif vod_mode == 4:
                 continue
+            elif vod_mode == 5:
+                nhnd_current_with_ytdlp()
         elif menu == 2:
             clip_type = print_clip_type_menu()
             if clip_type == 1:
